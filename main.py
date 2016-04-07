@@ -17,9 +17,12 @@ class Human(Player):
 
 
 class Node(object):
-    def __init__(self, board_state, move=None, height=0):
-        self.wins = 0
-        self.total = 0
+
+    inevitable_loss = 0
+    inevitable_win = 1
+    inevitable_nothingness = 2
+
+    def __init__(self, board_state, move=None, height=0, parent=None):
 
         # for help knowing which piece is played per level
         self.height = height
@@ -28,6 +31,10 @@ class Node(object):
         self.move = move
 
         self.board_state = board_state
+
+        self.type = Node.inevitable_nothingness
+
+        self.parent = parent
 
         self.nodes = []
 
@@ -53,19 +60,13 @@ class Ai(Player):
         # base case. leaf node. return whether this is victory or not
         if len(node.nodes) == 0:
             if self.is_our_victory(node.board_state.board, character):
-                node.wins = 1
-                return 1
-            elif self.is_our_victory(node.board_state.board, 'X' if character == 'X' else 'O'):
-                node.wins = -1
-                return -1
-            else:
-                node.wins = 0
-                return 0
+                node.type = Node.inevitable_win
+            elif self.is_our_victory(node.board_state.board, 'X' if character == 'O' else 'X'):
+                node.type = Node.inevitable_loss
+                node.parent.type = Node.inevitable_loss
 
         for leaf in node.nodes:
-            node.wins += self.score_tree(leaf, character)
-
-        return node.wins
+            self.score_tree(leaf, character)
 
     def is_our_victory(self, board, character):
         # check for horizontal victory
@@ -90,15 +91,15 @@ class Ai(Player):
     def make_tree(self, node):
         for move in self.get_possible_moves(node.board_state.board):
             tmp_clone = copy.deepcopy(node.board_state)
-            tmp_clone.set_piece(move[0], move[1], 'X' if node.height % 2 == 1 else 'O')
-            node.nodes.append(Node(tmp_clone, move=move, height=node.height + 1))
+            tmp_clone.set_piece(move[0], move[1], 'X' if node.height % 2 == 0 else 'O')
+            node.nodes.append(Node(tmp_clone, move=move, height=node.height + 1, parent=node))
 
         for leaf in node.nodes:
             # if this node results in an enemy victory, dont even bother!
-            if self.is_our_victory(leaf.board_state.board, 'X' if self.character != 'X' else 'O'):
-                node.score = -10000
-                node.nodes = []
-                return
+            # if self.is_our_victory(leaf.board_state.board, 'X' if self.character != 'X' else 'O'):
+            #     node.score = -10000
+            #     node.nodes = []
+            #     return
 
             if not leaf.board_state.game_over():
                 self.make_tree(leaf)
@@ -126,20 +127,33 @@ class Ai(Player):
                     self.tree_index = self.tree_index.nodes[i]
                     break
 
-        # ok, now which of the new branches has the highest chance of winning?
-        if len(self.tree_index.nodes) > 0:
-            best = self.tree_index.nodes[0]
-            for i in range(1, len(self.tree_index.nodes)):
-                if self.tree_index.nodes[i].wins > best.wins:
-                    best = self.tree_index.nodes[i]
-        else:
-            # no possible moves left. ruh oh!
+        # error checking: no moves possible
+        if 0 == len(self.tree_index.nodes):
             return
 
-        # advance our internal pointer and return that one
+        # if there is an inevitable victory: take it.
+        best = None
+        for leaf in self.tree_index.nodes:
+            if Node.inevitable_win == leaf.type:
+                best = leaf
+                break
 
+        # otherwise, take a non-inevitable loss choice
+        if best is None:
+            for leaf in self.tree_index.nodes:
+                if Node.inevitable_loss != leaf.type:
+                    best = leaf
+                    break
+
+        # if best is still None, it means we lose. capitulate!
+        if best is None:
+            print("you win! i capitulate")
+            exit()
+
+        # advance our internal pointer and return that one
         if board.set_piece(best.move[0], best.move[1], self.character):
             self.tree_index = best
+            print("take that!")
         else:
             print("something went wrong! i couldnt make my evil move!")
             exit()
